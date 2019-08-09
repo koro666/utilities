@@ -11,5 +11,6 @@ Build using `make`, or `make STATIC=1` to make `musl` static binaries.
 Description
 -----------
 
+- `setlogcons`: lifted from [BusyBox](https://git.busybox.net/busybox/tree/console-tools/setlogcons.c) and rewritten to build standalone.
 - `sleepuntil`: sleeps until a defined time, up to 24 hours in the future.
 - `vipcheck`: checks if binary files passed as arguments end with the bytes `\n[0-9]+^`; prints matching names.
