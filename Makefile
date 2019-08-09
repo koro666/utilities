@@ -7,12 +7,12 @@ CFLAGS+=-Wall -O3 -D_XOPEN_SOURCE=700
 
 .PHONY: build rebuild clean
 
-build: README.html setlogcons sleepuntil vipcheck
+build: README.html setlogcons sleepuntil uidmapshift vipcheck
 
 rebuild: clean build
 
 clean:
-	rm -f *.html setlogcons sleepuntil vipcheck
+	rm -f *.html setlogcons sleepuntil uidmapshift vipcheck
 
 %.html: %.md
 	markdown $< > $@
