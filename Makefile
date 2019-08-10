@@ -3,16 +3,20 @@ CC=musl-gcc
 LDFLAGS=-static
 endif
 
-CFLAGS+=-Wall -O3 -D_XOPEN_SOURCE=700
+CFLAGS+=-Wall -O3
 
 .PHONY: build rebuild clean
 
-build: README.html setlogcons sleepuntil uidmapshift vipcheck
+build: README.html iphm setlogcons sleepuntil uidmapshift vipcheck
 
 rebuild: clean build
 
 clean:
-	rm -f *.html setlogcons sleepuntil uidmapshift vipcheck
+	rm -f *.html iphm setlogcons sleepuntil uidmapshift vipcheck
 
 %.html: %.md
 	markdown $< > $@
+
+iphm: LDLIBS+=-lm
+sleepuntil: CFLAGS+=-D_XOPEN_SOURCE
+uidmapshift: CFLAGS+=-D_XOPEN_SOURCE=500
