@@ -143,7 +143,7 @@ int main(int argc, char *argv[])
 		range = atoi(argv[3]);
 	}
 
-	ret = nftw(base, ftw_callback, 1000, FTW_PHYS|FTW_CHDIR);
+	ret = nftw(base, ftw_callback, 1000, FTW_PHYS);
 	if (ret < 0) {
 		fprintf(stderr, "Failed to walk path %s %s\n", base, strerror(errno));
 		usage();
