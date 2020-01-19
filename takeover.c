@@ -7,8 +7,12 @@
 #include <pwd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <sys/select.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
 
@@ -16,12 +20,18 @@ static bool add_uid(const char*, size_t*, uid_t**);
 static bool check_uid(uid_t, size_t, const uid_t*);
 static int run_client(struct sockaddr_un*, socklen_t, int, char**);
 static int run_server(struct sockaddr_un*, socklen_t, size_t, const uid_t*, size_t, const uid_t*);
+static void server_handle_signal(int, int*);
+static void server_handle_request(int, size_t, const uid_t*, size_t, const uid_t*, int*);
 
 #define AUTO_FREE __attribute__((cleanup(cleanup_free)))
 #define AUTO_CLOSE __attribute__((cleanup(cleanup_close)))
+#define AUTO_RESTORE __attribute__((cleanup(cleanup_restore)))
+#define AUTO_UNLINK __attribute__((cleanup(cleanup_unlink)))
 
 static void cleanup_free(void*);
 static void cleanup_close(int*);
+static void cleanup_restore(sigset_t*);
+static void cleanup_unlink(char**);
 
 int main(int argc, char** argv)
 {
@@ -150,6 +160,26 @@ static int run_client(struct sockaddr_un* saddr, socklen_t slen, int pathc, char
 
 static int run_server(struct sockaddr_un* saddr, socklen_t slen, size_t uidc, const uid_t* uidv, size_t duidc, const uid_t* duidv)
 {
+	sigset_t mask;
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGHUP);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGTERM);
+
+	AUTO_RESTORE sigset_t omask = {};
+	if (sigprocmask(SIG_BLOCK, &mask, &omask) == -1)
+	{
+		perror("sigprocmask");
+		return EXIT_FAILURE;
+	}
+
+	AUTO_CLOSE int sig = signalfd(-1, &mask, SFD_CLOEXEC);
+	if (sig == -1)
+	{
+		perror("signalfd");
+		return EXIT_FAILURE;
+	}
+
 	AUTO_CLOSE int sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
 	if (sock == -1)
 	{
@@ -163,6 +193,10 @@ static int run_server(struct sockaddr_un* saddr, socklen_t slen, size_t uidc, co
 		return EXIT_FAILURE;
 	}
 
+	AUTO_UNLINK char* path = NULL;
+	if (saddr->sun_path[0])
+		path = saddr->sun_path;
+
 	int optval = 1;
 	if (setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1)
 	{
@@ -172,73 +206,130 @@ static int run_server(struct sockaddr_un* saddr, socklen_t slen, size_t uidc, co
 
 	while (true)
 	{
-		char buffer[CMSG_ALIGN(CMSG_SPACE(sizeof(struct ucred))) + CMSG_SPACE(sizeof(int))];
+		fd_set rfds;
+		FD_ZERO(&rfds);
+		FD_SET(sig, &rfds);
+		FD_SET(sock, &rfds);
 
-		struct msghdr msg =
-		{
-			.msg_control = buffer,
-			.msg_controllen = sizeof(buffer)
-		};
-
-		if (recvmsg(sock, &msg, MSG_CMSG_CLOEXEC) == -1)
+		int count = select(sig > sock ? sig + 1 : sock + 1, &rfds, NULL, NULL, NULL);
+		if (count == -1)
 		{
 			if (errno == EINTR)
 				continue;
 
-			perror("recvmsg");
+			perror("select");
 			return EXIT_FAILURE;
 		}
 
-		AUTO_CLOSE int fd = -1;
-		struct ucred cred = { -1, -1, -1 };
+		int code;
+		if (FD_ISSET(sig, &rfds))
+			server_handle_signal(sig, &code);
+		else if (FD_ISSET(sock, &rfds))
+			server_handle_request(sock, uidc, uidv, duidc, duidv, &code);
+		else
+			code = -1;
 
-		for (struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg,cmsg))
-		{
-			if (cmsg->cmsg_level != SOL_SOCKET)
-				continue;
+		if (code != -1)
+			return code;
+	}
+}
 
-			switch (cmsg->cmsg_type)
-			{
-				case SCM_CREDENTIALS:
-					memcpy(&cred, CMSG_DATA(cmsg), sizeof(struct ucred));
-					break;
-				case SCM_RIGHTS:
-					cleanup_close(&fd);
-					memcpy(&fd, CMSG_DATA(cmsg), sizeof(int));
-					break;
-			}
-		}
+static void server_handle_signal(int fd, int* code)
+{
+	*code = -1;
+	struct signalfd_siginfo fdsi;
 
-		if (fd == -1 || cred.uid == -1 || cred.gid == -1)
+	ssize_t size;
+	do { size = read(fd, &fdsi, sizeof(struct signalfd_siginfo)); }
+	while (size == -1 && errno == EINTR);
+
+	if (size == -1)
+	{
+		perror("read");
+		*code = EXIT_FAILURE;
+		return;
+	}
+
+	switch (fdsi.ssi_signo)
+	{
+		case SIGTERM:
+			*code = EXIT_SUCCESS;
+			return;
+		case SIGINT:
+			*code = EXIT_FAILURE;
+			return;
+	}
+}
+
+static void server_handle_request(int sock, size_t uidc, const uid_t* uidv, size_t duidc, const uid_t* duidv, int* code)
+{
+	*code = -1;
+	char buffer[CMSG_ALIGN(CMSG_SPACE(sizeof(struct ucred))) + CMSG_SPACE(sizeof(int))];
+
+	struct msghdr msg =
+	{
+		.msg_control = buffer,
+		.msg_controllen = sizeof(buffer)
+	};
+
+	ssize_t received;
+	do { received = recvmsg(sock, &msg, MSG_CMSG_CLOEXEC); }
+	while (received == -1 && errno == EINTR);
+
+	if (received == -1)
+	{
+		perror("recvmsg");
+		*code = EXIT_FAILURE;
+		return;
+	}
+
+	AUTO_CLOSE int fd = -1;
+	struct ucred cred = { -1, -1, -1 };
+
+	for (struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg,cmsg))
+	{
+		if (cmsg->cmsg_level != SOL_SOCKET)
 			continue;
 
-		if (!check_uid(cred.uid, uidc, uidv))
+		switch (cmsg->cmsg_type)
 		{
-			fprintf(stderr, "%d: Unauthorized caller uid\n", cred.uid);
-			continue;
-		}
-
-		struct stat buf;
-		if (fstat(fd, &buf) == -1)
-		{
-			perror("fstat");
-			continue;
-		}
-
-		if (!check_uid(buf.st_uid, duidc, duidv))
-		{
-			fprintf(stderr, "%d: Unauthorized owner uid\n", buf.st_uid);
-			continue;
-		}
-
-		if (fchown(fd, cred.uid, cred.gid) == -1)
-		{
-			perror("fchown");
-			continue;
+			case SCM_CREDENTIALS:
+				memcpy(&cred, CMSG_DATA(cmsg), sizeof(struct ucred));
+				break;
+			case SCM_RIGHTS:
+				cleanup_close(&fd);
+				memcpy(&fd, CMSG_DATA(cmsg), sizeof(int));
+				break;
 		}
 	}
 
-	return EXIT_SUCCESS;
+	if (fd == -1 || cred.uid == -1 || cred.gid == -1)
+		return;
+
+	if (!check_uid(cred.uid, uidc, uidv))
+	{
+		fprintf(stderr, "%d: Unauthorized caller uid\n", cred.uid);
+		return;
+	}
+
+	struct stat buf;
+	if (fstat(fd, &buf) == -1)
+	{
+		perror("fstat");
+		return;
+	}
+
+	if (!check_uid(buf.st_uid, duidc, duidv))
+	{
+		fprintf(stderr, "%d: Unauthorized owner uid\n", buf.st_uid);
+		return;
+	}
+
+	if (fchown(fd, cred.uid, cred.gid) == -1)
+	{
+		perror("fchown");
+		return;
+	}
 }
 
 static void cleanup_free(void* pp)
@@ -250,4 +341,15 @@ static void cleanup_close(int* pfd)
 {
 	if (*pfd != -1)
 		close(*pfd);
+}
+
+static void cleanup_restore(sigset_t* mask)
+{
+	sigprocmask(SIG_SETMASK, mask, NULL);
+}
+
+static void cleanup_unlink(char** ppath)
+{
+	if (*ppath)
+		unlink(*ppath);
 }
