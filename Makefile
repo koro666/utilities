@@ -7,12 +7,12 @@ CFLAGS+=-Wall -O3
 
 .PHONY: build rebuild clean
 
-build: README.html iphm setlogcons sleepuntil takeover tsvstat uidmapshift vipcheck
+build: README.html hexx iphm setlogcons sleepuntil takeover tsvstat uidmapshift vipcheck
 
 rebuild: clean build
 
 clean:
-	rm -f *.html iphm setlogcons sleepuntil takeover tsvstat uidmapshift vipcheck
+	rm -f *.html hexx iphm setlogcons sleepuntil takeover tsvstat uidmapshift vipcheck
 
 %.html: %.md
 	markdown $< > $@

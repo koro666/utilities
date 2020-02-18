@@ -11,6 +11,7 @@ Build using `make`, or `make STATIC=1` to make `musl` static binaries.
 Description
 -----------
 
+- `hexx`: generates hex dumps in the right format.
 - `iphm`: takes IPv4 addresses/ranges on stdin and outputs an heatmap on stdout in PPM format; similar to [xkcd](https://xkcd.com/195/) with a slightly different order.
 - `setlogcons`: lifted from [busybox](https://git.busybox.net/busybox/tree/console-tools/setlogcons.c) and rewritten to build standalone.
 - `sleepuntil`: sleeps until a defined time, up to 24 hours in the future.
