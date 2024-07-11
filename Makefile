@@ -7,16 +7,17 @@ CFLAGS+=-Wall -O3
 
 .PHONY: build rebuild clean
 
-build: README.html hexx iphm setlogcons sleepuntil takeover tsvstat uidmapshift vipcheck
+build: README.html bt2mt hexx iphm setlogcons sleepuntil takeover tsvstat uidmapshift vipcheck
 
 rebuild: clean build
 
 clean:
-	rm -f *.html hexx iphm setlogcons sleepuntil takeover tsvstat uidmapshift vipcheck
+	rm -f *.html bt2mt hexx iphm setlogcons sleepuntil takeover tsvstat uidmapshift vipcheck
 
 %.html: %.md
 	markdown $< > $@
 
+bt2mt: CFLAGS+=-D_GNU_SOURCE
 iphm: LDLIBS+=-lm
 sleepuntil: CFLAGS+=-D_XOPEN_SOURCE
 takeover: CFLAGS+=-D_GNU_SOURCE
