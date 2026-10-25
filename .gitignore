@@ -1,9 +1,13 @@
 *.html
+*.o
+*.zip
 bt2mt
 hexx
 iphm
 setlogcons
 sleepuntil
+sqlite3
+sqlstat
 takeover
 tsvstat
 uidmapshift
