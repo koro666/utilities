@@ -4,7 +4,7 @@ LDFLAGS=-static
 endif
 
 CFLAGS+=-Wall -O3 -ffunction-sections -fdata-sections -fvisibility=hidden
-LDFLAGS+=-Wl,--gc-sections -Wl,--build-id=none
+LDFLAGS+=-Wl,--gc-sections,--build-id=none
 
 .PHONY: build rebuild clean
 
@@ -35,10 +35,12 @@ bt2mt: CPPFLAGS+=-D_GNU_SOURCE
 iphm: LDLIBS+=-lm
 sleepuntil: CPPFLAGS+=-D_XOPEN_SOURCE
 ifdef STATIC
+sqlite3/sqlite3.o: CPPFLAGS+=-DSQLITE_DEFAULT_MEMSTATUS=0 -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_PROGRESS_CALLBACK -DSQLITE_THREADSAFE=0 -DSQLITE_USE_ALLOCA
 sqlstat: sqlstat.o sqlite3/sqlite3.o
-sqlstat.o: CFLAGS+=-Isqlite3
+sqlstat.o: CFLAGS+=-Isqlite3 -D_GNU_SOURCE
 sqlstat.o: sqlite3/sqlite3.h
 else
+sqlstat: CPPFLAGS+=-D_GNU_SOURCE
 sqlstat: LDLIBS+=-lsqlite3
 endif
 takeover: CPPFLAGS+=-D_GNU_SOURCE
