@@ -3,7 +3,8 @@ CC=musl-gcc
 LDFLAGS=-static
 endif
 
-CFLAGS+=-Wall -O3
+CFLAGS+=-Wall -O3 -ffunction-sections -fdata-sections -fvisibility=hidden
+LDFLAGS+=-Wl,--gc-sections -Wl,--build-id=none
 
 .PHONY: build rebuild clean
 
